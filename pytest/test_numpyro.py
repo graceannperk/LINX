@@ -1,5 +1,8 @@
 import sys
-sys.path.append('../scripts')
+import os
+import pytest
+# Add absolute path to the scripts directory
+sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'scripts'))
 
 from run_numpyro import run
 
