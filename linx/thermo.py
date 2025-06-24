@@ -787,8 +787,8 @@ def rho_plus_p_EM_std(T_g, mu=0, LO=True, NLO=True):
     )
     
     return (
-        4/3 * rho_massless_BE(T_g, 0., 2) + rho_massive_FD(T_g, 0., 0.511, 4) 
-        + p_massive_FD(T_g, 0., 0.511, 4) + corr_QED
+        4/3 * rho_massless_BE(T_g, 0., 2) + rho_massive_FD(T_g, 0., const.me, 4) 
+        + p_massive_FD(T_g, 0., const.me, 4) + corr_QED
     )
 
 def T_g(rho_g):
