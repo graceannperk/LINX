@@ -97,7 +97,7 @@ class AbundanceModel(eqx.Module):
         self, rho_g_vec, rho_nu_vec, rho_NP_vec, P_NP_vec, 
         a_vec=None, t_vec=None, 
         eta_fac=jnp.asarray(1.), tau_n_fac = jnp.asarray(1.), 
-        nuclear_rates_q=None, 
+        nuclear_rates_q=None, me = const.me,
         Y_i=None, T_start=None, T_end=None, sampling_nTOp=150, 
         rtol=1e-6, atol=1e-9, solver=Kvaerno3(),
         max_steps=4096,
@@ -130,6 +130,8 @@ class AbundanceModel(eqx.Module):
         nuclear_rates_q : array, optional
             q ~ N(0,1) specifies the nuclear rate in its log-normal 
             distribution. If not specified, will be taken to be `q = 0`. 
+        me : float, optional
+            Electron mass in MeV.  Defaults to `const.me`.
         Y_i : tuple of float, optional
             Initial abundances :math:`n_i/n_b` for species. Length must be equal to 
             `self.nuclear_net.max_i_species`. Must specify `T_start` and `T_end` if not `None`. 
@@ -227,7 +229,7 @@ class AbundanceModel(eqx.Module):
 
         T_interval_nTOp, nTOp_frwrd, nTOp_bkwrd = self.weak_rates(
             jnp.array([T_g_vec, T_nu_vec]), 
-            T_start=T_start, T_end=T_end, sampling_nTOp=sampling_nTOp
+            T_start=T_start, T_end=T_end, sampling_nTOp=sampling_nTOp, me=me
         )
 
         ##################################
