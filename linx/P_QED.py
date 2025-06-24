@@ -66,5 +66,6 @@ def P_QED(T,me): # not needed, sums in thermo
 dPdTQED_2 = grad(explicit_P2,argnums=0)
 dPdTQED_3 = grad(explicit_P3,argnums=0)
 
+# we don't need these computed explicitly, actually
 d2PdT2QED_2 = grad(dPdTQED_2,argnums=0)
 d2PdT2QED_3 = grad(dPdTQED_3,argnums=0)

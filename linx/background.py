@@ -50,8 +50,8 @@ class BackgroundModel(eqx.Module):
     @eqx.filter_jit
     def __call__(
         self, Delt_Neff_init, T_start=const.T_start, 
-        T_end=const.T_end, rtol=1e-8, atol=1e-10, 
-        solver=Tsit5(), max_steps=512
+        T_end=const.T_end,  me=const.me, rtol=1e-8, atol=1e-10, 
+        solver=Tsit5(), max_steps=512,
     ): 
         """ Calculate thermodynamics given an initial :math:`\\Delta N_\\mathrm{eff}`.
 
@@ -59,11 +59,13 @@ class BackgroundModel(eqx.Module):
         ----------
         Delt_Neff_init : float
             Initial :math:`\\Delta N_\\mathrm{eff}`.  Can be positive or negative.  
-        T_EM_init : float
+        T_EM_init : float, optional
             Initial EM (and neutrino) temperature. Default is `const.T_start`. 
-        T_EM_end : float 
+        T_EM_end : float, optional
             Final EM temperature to terminate integration at. Default is
             `const.T_end`. 
+        me : float, optional
+            Electron mass in MeV.  Defaults to `const.me`.
         rtol : float, optional
             Relative tolerance of the abundance solver. Default is `1e-8`.  
         atol : float, optional
@@ -113,7 +115,7 @@ class BackgroundModel(eqx.Module):
             return y[1] < T_end
             
         sol = diffeqsolve(
-            ODETerm(self.dY), solver, args=(lna_init, rho_extra_init),
+            ODETerm(self.dY), solver, args=(lna_init, rho_extra_init, me),
             t0=0., t1=jnp.inf, dt0=None, y0=Y0, 
             saveat=SaveAt(steps=True), event=Event(T_EM_check),
             stepsize_controller = PIDController(
@@ -192,11 +194,11 @@ class BackgroundModel(eqx.Module):
         """
 
         lna, T_g, T_nu = Y
-        lna_init, rho_extra_init = args
+        lna_init, rho_extra_init, me = args
 
-        rho_EM = thermo.rho_EM_std(T_g, LO=self.LO, NLO=self.NLO)
-        rho_plus_p_EM = thermo.rho_plus_p_EM_std(T_g, LO=self.LO, NLO=self.NLO)
-        drho_EM_dT_g = thermo.drho_EM_dT_g_std(T_g, LO=self.LO, NLO=self.NLO)
+        rho_EM = thermo.rho_EM_std(T_g, me=me, LO=self.LO, NLO=self.NLO)
+        rho_plus_p_EM = thermo.rho_plus_p_EM_std(T_g, me=me, LO=self.LO, NLO=self.NLO)
+        drho_EM_dT_g = thermo.drho_EM_dT_g_std(T_g, me=me, LO=self.LO, NLO=self.NLO)
 
         rho_nu = 3*thermo.rho_nue_std(T_nu)
         rho_plus_p_nu = (4/3) * rho_nu

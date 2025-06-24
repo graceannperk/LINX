@@ -8,6 +8,7 @@ from jax import grad, vmap
 
 import linx.const as const 
 from linx.special_funcs import Li, K1, K2
+from linx.P_QED import explicit_P2, explicit_P3, dPdTQED_2,dPdTQED_3
 
 ###########################################
 #                 Cosmology               #
@@ -633,16 +634,16 @@ def p_massive_MB(T, mu, m, g):
 
 file_dir = os.path.dirname(__file__)
 
-# QED Corrections
+# QED Corrections (assume me = 0.511 MeV)
 P_QED_tab = np.loadtxt(file_dir+"/data/background/"+"QED_P_int.txt")
 dPdT_QED_tab = np.loadtxt(file_dir+"/data/background/"+"QED_dP_intdT.txt")
-d2PdT2_QED_tab = np.loadtxt(file_dir+"/data/background/"+"QED_d2P_intdT2.txt")
+# d2PdT2_QED_tab = np.loadtxt(file_dir+"/data/background/"+"QED_d2P_intdT2.txt") # CG: JAX grad obviates this import...
 
-# Effect of standard value of electron mass in scattering matrix elements
+# Effect of standard value of electron mass in scattering matrix elements (assume me = 0.511 MeV)
 f_nue_scat_tab = np.loadtxt(file_dir+"/data/background/"+"nue_scatt.txt")
 f_numu_scat_tab = np.loadtxt(file_dir+"/data/background/"+"numu_scatt.txt")
 
-# Effect of standard value of electron mass in annihilation matrix elements
+# Effect of standard value of electron mass in annihilation matrix elements (assume me = 0.511 MeV)
 f_nue_ann_tab = np.loadtxt(file_dir+"/data/background/"+"nue_ann.txt")
 f_numu_ann_tab = np.loadtxt(file_dir+"/data/background/"+"numu_ann.txt")
 
@@ -654,9 +655,9 @@ try:
     dPdT_QED_tab = jax.device_put(
         dPdT_QED_tab, device=gpus[0]
     )
-    d2PdT2_QED_tab  = jax.device_put(
-        d2PdT2_QED_tab , device=gpus[0]
-    )
+    # d2PdT2_QED_tab  = jax.device_put(
+    #     d2PdT2_QED_tab , device=gpus[0]
+    # )
 
     f_nue_scat_tab = jax.device_put(
         f_nue_scat_tab, device=gpus[0]
@@ -679,7 +680,7 @@ except:
 # Standard EM Sector #
 ######################
 
-def rho_EM_std(T_g, mu=0, LO=True, NLO=True): 
+def rho_EM_std(T_g, mu=0, me=const.me, LO=True, NLO=True): 
     """
     Total energy density of EM-coupled SM fluids.
 
@@ -690,6 +691,8 @@ def rho_EM_std(T_g, mu=0, LO=True, NLO=True):
     mu : float, optional
         Parameter added for syntax consistency--does not impact function
         behavior.  Defaults to 0.
+    me : float, optional
+        Electron mass in MeV.  Defaults to const.me.
     LO : bool
         True includes leading order QED corrections to the energy density.
         Defaults to 'True'.
@@ -703,15 +706,18 @@ def rho_EM_std(T_g, mu=0, LO=True, NLO=True):
         Units of MeV^4. 
     """ 
 
-    corr_QED = (
-        -jnp.interp(
-            T_g, jnp.flip(P_QED_tab[:,0]), 
-            jnp.flip(LO*P_QED_tab[:,1]+NLO*P_QED_tab[:,2])
-        ) 
-        + T_g*jnp.interp(
-            T_g, jnp.flip(dPdT_QED_tab[:,0]),
-            jnp.flip(LO*dPdT_QED_tab[:,1]+NLO*dPdT_QED_tab[:,2])
-        )
+    corr_QED = jnp.where(jnp.abs(me/const.me - 1) > 1e-8, # if input me is sufficiently different from const.me,
+        -(LO*explicit_P2(T_g, me) + NLO*explicit_P3(T_g, me)) + T_g*(LO*dPdTQED_2(T_g, me) + NLO*dPdTQED_3(T_g, me)), # compute the QED correction
+        (
+            -jnp.interp(
+                T_g, jnp.flip(P_QED_tab[:,0]), 
+                jnp.flip(LO*P_QED_tab[:,1]+NLO*P_QED_tab[:,2])
+            ) 
+            + T_g*jnp.interp(
+                T_g, jnp.flip(dPdT_QED_tab[:,0]),
+                jnp.flip(LO*dPdT_QED_tab[:,1]+NLO*dPdT_QED_tab[:,2])
+            )
+        ) # otherwise just use pretabulated values
     )
 
     return (
@@ -721,7 +727,7 @@ def rho_EM_std(T_g, mu=0, LO=True, NLO=True):
 
 rho_EM_std_v = vmap(rho_EM_std, in_axes=0)
 
-def p_EM_std(T_g, mu=0, LO=True, NLO=True): 
+def p_EM_std(T_g, mu=0, me=const.me, LO=True, NLO=True): 
     """
     Total pressure of EM-coupled SM fluids.
 
@@ -732,6 +738,8 @@ def p_EM_std(T_g, mu=0, LO=True, NLO=True):
     mu : float, optional
         Parameter added for syntax consistency--does not impact function
         behavior.  Defaults to 0.
+    me : float, optional
+        Electron mass in MeV.  Defaults to const.me.
     LO : bool
         True includes leading order QED corrections to the pressure.
         Defaults to 'True'.
@@ -745,10 +753,14 @@ def p_EM_std(T_g, mu=0, LO=True, NLO=True):
         Units of MeV^4. 
     """ 
 
-    corr_QED = jnp.interp(
-        T_g, jnp.flip(P_QED_tab[:,0]),
-        jnp.flip(LO*P_QED_tab[:,1] + NLO*P_QED_tab[:,2])
+    corr_QED = jnp.where(jnp.abs(me/const.me - 1) > 1e-8, # if input me is sufficiently different from const.me,
+        LO*explicit_P2(T_g, me) + NLO*explicit_P3(T_g, me), # compute the QED correction
+        jnp.interp(
+            T_g, jnp.flip(P_QED_tab[:,0]),
+            jnp.flip(LO*P_QED_tab[:,1] + NLO*P_QED_tab[:,2])
+        ) # otherwise just use pretabulated values
     )
+
 
     return (
         p_massless_BE(T_g, 0., 2) + p_massive_FD(T_g, 0., const.me, 4) 
@@ -757,7 +769,7 @@ def p_EM_std(T_g, mu=0, LO=True, NLO=True):
 
 p_EM_std_v = vmap(p_EM_std, in_axes=0)
 
-def rho_plus_p_EM_std(T_g, mu=0, LO=True, NLO=True): 
+def rho_plus_p_EM_std(T_g, mu=0, me=const.me, LO=True, NLO=True): 
     """
     Sum of energy densities and pressures of all EM-coupled SM fluids.
 
@@ -768,6 +780,8 @@ def rho_plus_p_EM_std(T_g, mu=0, LO=True, NLO=True):
     mu : float, optional
         Parameter added for syntax consistency--does not impact function
         behavior.  Defaults to 0.
+    me : float, optional
+        Electron mass in MeV.  Defaults to const.me.
     LO : bool
         True includes leading order QED corrections to the energy density 
         and pressure.  Defaults to 'True'.
@@ -780,10 +794,13 @@ def rho_plus_p_EM_std(T_g, mu=0, LO=True, NLO=True):
     float 
         Units of MeV^4. 
     """ 
-
-    corr_QED = T_g * jnp.interp(
-        T_g, jnp.flip(dPdT_QED_tab[:,0]),
-        jnp.flip(LO*dPdT_QED_tab[:,1] + NLO*dPdT_QED_tab[:,2])
+        
+    corr_QED = jnp.where(jnp.abs(me/const.me - 1) > 1e-8, # if input me is sufficiently different from const.me,
+        T_g*(LO*dPdTQED_2(T_g, me) + NLO*dPdTQED_3(T_g, me)), # compute the QED correction
+        T_g * jnp.interp(
+            T_g, jnp.flip(dPdT_QED_tab[:,0]),
+            jnp.flip(LO*dPdT_QED_tab[:,1] + NLO*dPdT_QED_tab[:,2])
+        ) # otherwise just use pretabulated values
     )
     
     return (
