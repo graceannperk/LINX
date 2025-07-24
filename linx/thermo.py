@@ -1103,7 +1103,7 @@ def collision_terms_std(
         )
         
         return ( # note f_a and f_s are now folded into f_nue_ann/scat -- checking f_nue vs just f
-            32 *  4 * (geL**2 + geR**2) * (f_ann_1 * (
+              4 * (geL**2 + geR**2) * (32 * f_ann_1 * (
                 T_1**9 * jnp.exp(2 * mu_1 / T_1) 
                 - T_2**9 * jnp.exp(2 * mu_2 / T_2)
                     ) 
