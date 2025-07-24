@@ -209,7 +209,7 @@ class BackgroundModel(eqx.Module):
         H = thermo.Hubble(rho_EM + rho_nu + rho_extra)
 
         C_rho_nue, C_rho_numu, _, _ = thermo.collision_terms_std(
-            T_g, T_nu, T_nu, decoupled=self.decoupled, use_FD=self.use_FD, collision_me=self.collision_me
+            T_g, T_nu, T_nu, me=me, decoupled=self.decoupled, use_FD=self.use_FD, collision_me=self.collision_me
         )
 
         drho_EM_dt = -3 * H * rho_plus_p_EM - C_rho_nue - 2*C_rho_numu

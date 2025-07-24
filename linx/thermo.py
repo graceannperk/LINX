@@ -647,6 +647,10 @@ f_numu_scat_tab = np.loadtxt(file_dir+"/data/background/"+"numu_scatt.txt")
 f_nue_ann_tab = np.loadtxt(file_dir+"/data/background/"+"nue_ann.txt")
 f_numu_ann_tab = np.loadtxt(file_dir+"/data/background/"+"numu_ann.txt")
 
+# Use scattering coefficients provided by Miguel Escudero, Greg Jackson, Stefan Sandner and Mikko Laine, to appear
+# no assumption that me = 0.511 MeV
+f_coeffs = np.loadtxt(file_dir+"/data/background/"+"MB_coefficients.txt")
+
 try:
     gpus = jax.devices('gpu')
     P_QED_tab = jax.device_put(
@@ -671,6 +675,10 @@ try:
     )
     f_numu_ann_tab = jax.device_put(
         f_numu_ann_tab, device=gpus[0]
+    )
+
+    f_coeffs = jax.device_put(
+        f_coeffs, device=gpus[0]
     )
 except: 
     pass
@@ -972,7 +980,7 @@ dn_numt_dmu_numt_std   = grad(n_numt_std, argnums=1)
 
 
 def collision_terms_std(
-    T_g, T_nue, T_numt, mu_nue=0., mu_numt=0., 
+    T_g, T_nue, T_numt, me=const.me, mu_nue=0., mu_numt=0., 
     decoupled=False, use_FD=True, collision_me=True
 ): 
     """
@@ -987,6 +995,8 @@ def collision_terms_std(
         Electron neutrino temperature in MeV.
     T_numt : array_like
         Mu, tau neutrino temperature in MeV.
+    me : float, optional
+        Electron mass in MeV.  Defaults to const.me
     mu_nue : float, optional
         Chemical potential of electron neutrinos in MeV.
         Defaults to 0.
@@ -1021,6 +1031,11 @@ def collision_terms_std(
         0.
     )
 
+    geL  = const.geL
+    geR  = const.geR
+    gmuL = const.gmuL
+    gmuR = const.gmuR
+
     def G(T_1, mu_1, T_2, mu_2): 
         
         return (
@@ -1033,72 +1048,165 @@ def collision_terms_std(
             )
         )
 
-    def G_nue_with_me(T_1, mu_1, T_2, mu_2):
+    def G_nue_with_me(T_1, mu_1, T_2, mu_2, me):
 
-        def interp_f(f_tab): 
-
-            return jnp.interp(
-                T_1, f_tab[:,0], f_tab[:,1], left=f_tab[0,1], right=f_tab[-1,1]
-            )
-
-        f_nue_ann  = lax.cond(
-            collision_me, interp_f, lambda _: 1., f_nue_ann_tab
-        )
-        f_nue_scat = lax.cond(
-            collision_me, interp_f, lambda _: 1., f_nue_scat_tab
-        )
-        
-        return (
-            32 * f_a * f_nue_ann * (
-                T_1**9 * jnp.exp(2 * mu_1 / T_1) 
-                - T_2**9 * jnp.exp(2 * mu_2 / T_2)
-            ) 
-            + 56 * f_s * f_nue_scat * (
-                jnp.exp(2 * mu_1 / T_1) * jnp.exp(2 * mu_2 / T_2) 
-                * T_1**4 * T_2**4 * (T_1 - T_2)
-            )
-        )
-
-    def G_numt_with_me(T_1, mu_1, T_2, mu_2): 
-
-        def interp_f(f_tab): 
+        def interp_fa1(f_tab): 
 
             return jnp.interp(
-                T_1, f_tab[:,0], f_tab[:,1], left=f_tab[0,1], right=f_tab[-1,1]
+                me/T_1, f_tab[:,0], f_tab[:,1], left=f_tab[0,1], right=f_tab[-1,1]
             )
 
-        f_numt_ann  = lax.cond(
-            collision_me, interp_f, lambda _: 1., f_numu_ann_tab
+        def interp_fa2(f_tab): 
+
+            return jnp.interp(
+                me/T_1, f_tab[:,0], f_tab[:,2], left=f_tab[0,2], right=f_tab[-1,1]
+            )
+
+        def interp_fs1(f_tab): 
+
+            return jnp.interp(
+                me/T_1, f_tab[:,0], f_tab[:,5], left=f_tab[0,5], right=f_tab[-1,1]
+            )
+
+        def interp_fs2(f_tab): 
+
+            return jnp.interp(
+                me/T_1, f_tab[:,0], f_tab[:,6], left=f_tab[0,6], right=f_tab[-1,1]
+            )
+
+        # def interp_f(f_tab): 
+
+        #     return jnp.interp(
+        #         T_1, f_tab[:,0], f_tab[:,1], left=f_tab[0,1], right=f_tab[-1,1]
+        #     )
+
+        # f_nue_ann  = lax.cond(
+        #     collision_me, interp_f, lambda _: 1., f_nue_ann_tab
+        # )
+        # f_nue_scat = lax.cond(
+        #     collision_me, interp_f, lambda _: 1., f_nue_scat_tab
+        # )
+
+        f_ann_1  = lax.cond(
+            collision_me, interp_fa1, lambda _: 1., f_coeffs
         )
-        f_numt_scat = lax.cond(
-            collision_me, interp_f, lambda _: 1., f_numu_scat_tab
+        f_scat_1 = lax.cond(
+            collision_me, interp_fs1, lambda _: 1., f_coeffs
+        )
+
+        f_ann_2  = lax.cond(
+            collision_me, interp_fa2, lambda _: 1., f_coeffs
+        )
+        f_scat_2 = lax.cond(
+            collision_me, interp_fs2, lambda _: 1., f_coeffs
         )
         
-        return (
-            32 * f_a * f_numt_ann * (
+        return ( # note f_a and f_s are now folded into f_nue_ann/scat -- checking f_nue vs just f
+            32 *  4 * (geL**2 + geR**2) * (f_ann_1 * (
                 T_1**9 * jnp.exp(2 * mu_1 / T_1) 
                 - T_2**9 * jnp.exp(2 * mu_2 / T_2)
-            ) 
-            + 56 * f_s * f_numt_scat * (
-                jnp.exp(2 * mu_1 / T_1) * jnp.exp(2 * mu_2 / T_2) 
-                * T_1**4 * T_2**4 * (T_1 - T_2)
+                    ) 
+                + 56 * f_scat_1 * (
+                    jnp.exp(2 * mu_1 / T_1) * jnp.exp(2 * mu_2 / T_2) 
+                    * T_1**4 * T_2**4 * (T_1 - T_2)
+                )
+            )
+            # new terms!
+            + 4 * geL*geR * (f_ann_2 * 32 * (
+                T_1**9 * jnp.exp(2 * mu_1 / T_1) 
+                - T_2**9 * jnp.exp(2 * mu_2 / T_2)
+                )
+                + 56 * f_scat_2 * (
+                    jnp.exp(2 * mu_1 / T_1) * jnp.exp(2 * mu_2 / T_2) 
+                    * T_1**4 * T_2**4 * (T_1 - T_2)
+                )
             )
         )
 
-    geL  = const.geL
-    geR  = const.geR
-    gmuL = const.gmuL
-    gmuR = const.gmuR
+    def G_numt_with_me(T_1, mu_1, T_2, mu_2, me): 
+
+        def interp_fa1(f_tab): 
+
+            return jnp.interp(
+                me/T_1, f_tab[:,0], f_tab[:,1], left=f_tab[0,1], right=f_tab[-1,1]
+            )
+
+        def interp_fa2(f_tab): 
+
+            return jnp.interp(
+                me/T_1, f_tab[:,0], f_tab[:,2], left=f_tab[0,2], right=f_tab[-1,1]
+            )
+
+        def interp_fs1(f_tab): 
+
+            return jnp.interp(
+                me/T_1, f_tab[:,0], f_tab[:,5], left=f_tab[0,5], right=f_tab[-1,1]
+            )
+
+        def interp_fs2(f_tab): 
+
+            return jnp.interp(
+                me/T_1, f_tab[:,0], f_tab[:,6], left=f_tab[0,6], right=f_tab[-1,1]
+            )
+
+        # def interp_f(f_tab): 
+
+        #     return jnp.interp(
+        #         T_1, f_tab[:,0], f_tab[:,1], left=f_tab[0,1], right=f_tab[-1,1]
+        #     )
+
+        # f_numt_ann  = lax.cond(
+        #     collision_me, interp_f, lambda _: 1., f_numu_ann_tab
+        # )
+        # f_numt_scat = lax.cond(
+        #     collision_me, interp_f, lambda _: 1., f_numu_scat_tab
+        # )
+
+        f_ann_1  = lax.cond(
+            collision_me, interp_fa1, lambda _: 1., f_coeffs
+        )
+        f_scat_1 = lax.cond(
+            collision_me, interp_fs1, lambda _: 1., f_coeffs
+        )
+
+        f_ann_2  = lax.cond(
+            collision_me, interp_fa2, lambda _: 1., f_coeffs
+        )
+        f_scat_2 = lax.cond(
+            collision_me, interp_fs2, lambda _: 1., f_coeffs
+        )
+        
+        return ( # f_s, f_a now folded into f_numu -- checking if it should be the same terms for both functions
+            4 * (gmuL**2 + gmuR**2) * (32 * f_ann_1 * (
+                T_1**9 * jnp.exp(2 * mu_1 / T_1) 
+                - T_2**9 * jnp.exp(2 * mu_2 / T_2)
+                ) 
+                + 56 * f_scat_1 * (
+                    jnp.exp(2 * mu_1 / T_1) * jnp.exp(2 * mu_2 / T_2) 
+                    * T_1**4 * T_2**4 * (T_1 - T_2)
+                )
+            )
+            # new terms!
+            + 4 * geL*geR * (f_ann_2 * 32 * (
+                T_1**9 * jnp.exp(2 * mu_1 / T_1) 
+                - T_2**9 * jnp.exp(2 * mu_2 / T_2)
+                )
+                + 56 * f_scat_2 * (
+                    jnp.exp(2 * mu_1 / T_1) * jnp.exp(2 * mu_2 / T_2) 
+                    * T_1**4 * T_2**4 * (T_1 - T_2)
+                )
+            )
+        )
 
     # Units MeV^4 s^-1
-    C_rho_nue = const.GF**2 / jnp.pi**5 * (
-        4 * (geL**2 + geR**2) * G_nue_with_me(T_g, 0., T_nue, mu_nue) 
+    C_rho_nue = const.GF**2 / jnp.pi**5 * ( # prev coeff now in G def
+       G_nue_with_me(T_g, 0., T_nue, mu_nue, me) 
         + 2 * G(T_numt, mu_numt, T_nue, mu_nue)
     ) / const.hbar
 
     # Units MeV^4 s^-1
     C_rho_numu = const.GF**2 / jnp.pi**5 * (
-        4 * (gmuL**2 + gmuR**2) * G_numt_with_me(T_g, 0., T_numt, mu_numt) 
+        G_numt_with_me(T_g, 0., T_numt, mu_numt, me) 
         - G(T_numt, mu_numt, T_nue, mu_nue)
     ) / const.hbar 
 
@@ -1121,5 +1229,5 @@ def collision_terms_std(
             - T_nue**8 * jnp.exp(2 * mu_nue / T_nue)
         )
     ) / const.hbar
-
+    
     return C_rho_nue, C_rho_numu, C_n_nue, C_n_numu
