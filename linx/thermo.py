@@ -1051,28 +1051,29 @@ def collision_terms_std(
     def G_nue_with_me(T_1, mu_1, T_2, mu_2, me):
 
         def interp_fa1(f_tab): 
-
+            index = 1
             return jnp.interp(
-                me/T_1, f_tab[:,0], f_tab[:,1], left=f_tab[0,1], right=f_tab[-1,1]
+                me/T_1, f_tab[:,0], f_tab[:,index], left=f_tab[0,index], right=f_tab[-1,index]
             )
 
         def interp_fa2(f_tab): 
-
+            index = 2
             return jnp.interp(
-                me/T_1, f_tab[:,0], f_tab[:,2], left=f_tab[0,2], right=f_tab[-1,1]
+                me/T_1, f_tab[:,0], f_tab[:,index], left=f_tab[0,index], right=f_tab[-1,index]
             )
 
         def interp_fs1(f_tab): 
-
+            index = 5
             return jnp.interp(
-                me/T_1, f_tab[:,0], f_tab[:,5], left=f_tab[0,5], right=f_tab[-1,1]
+                me/T_1, f_tab[:,0], f_tab[:,index], left=f_tab[0,index], right=f_tab[-1,index]
             )
 
         def interp_fs2(f_tab): 
-
+            index = 6
             return jnp.interp(
-                me/T_1, f_tab[:,0], f_tab[:,6], left=f_tab[0,6], right=f_tab[-1,1]
+                me/T_1, f_tab[:,0], f_tab[:,index], left=f_tab[0,index], right=f_tab[-1,index]
             )
+            
 
         # def interp_f(f_tab): 
 
@@ -1126,27 +1127,27 @@ def collision_terms_std(
     def G_numt_with_me(T_1, mu_1, T_2, mu_2, me): 
 
         def interp_fa1(f_tab): 
-
+            index = 1
             return jnp.interp(
-                me/T_1, f_tab[:,0], f_tab[:,1], left=f_tab[0,1], right=f_tab[-1,1]
+                me/T_1, f_tab[:,0], f_tab[:,index], left=f_tab[0,index], right=f_tab[-1,index]
             )
 
         def interp_fa2(f_tab): 
-
+            index = 2
             return jnp.interp(
-                me/T_1, f_tab[:,0], f_tab[:,2], left=f_tab[0,2], right=f_tab[-1,1]
+                me/T_1, f_tab[:,0], f_tab[:,index], left=f_tab[0,index], right=f_tab[-1,index]
             )
 
         def interp_fs1(f_tab): 
-
+            index = 5
             return jnp.interp(
-                me/T_1, f_tab[:,0], f_tab[:,5], left=f_tab[0,5], right=f_tab[-1,1]
+                me/T_1, f_tab[:,0], f_tab[:,index], left=f_tab[0,index], right=f_tab[-1,index]
             )
 
         def interp_fs2(f_tab): 
-
+            index = 6
             return jnp.interp(
-                me/T_1, f_tab[:,0], f_tab[:,6], left=f_tab[0,6], right=f_tab[-1,1]
+                me/T_1, f_tab[:,0], f_tab[:,index], left=f_tab[0,index], right=f_tab[-1,index]
             )
 
         # def interp_f(f_tab): 
@@ -1187,7 +1188,7 @@ def collision_terms_std(
                 )
             )
             # new terms!
-            + 4 * geL*geR * (f_ann_2 * 32 * (
+            + 4 * gmuL*gmuR * (f_ann_2 * 32 * (
                 T_1**9 * jnp.exp(2 * mu_1 / T_1) 
                 - T_2**9 * jnp.exp(2 * mu_2 / T_2)
                 )
