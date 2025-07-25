@@ -1102,7 +1102,7 @@ def collision_terms_std(
             collision_me, interp_fs2, lambda _: 1., f_coeffs
         )
         
-        return ( # note f_a and f_s are now folded into f_nue_ann/scat -- checking f_nue vs just f
+        return ( # note f_a and f_s are now folded into f_nue_ann/scat
               4 * (geL**2 + geR**2) * (32 * f_ann_1 * (
                 T_1**9 * jnp.exp(2 * mu_1 / T_1) 
                 - T_2**9 * jnp.exp(2 * mu_2 / T_2)
@@ -1112,7 +1112,7 @@ def collision_terms_std(
                     * T_1**4 * T_2**4 * (T_1 - T_2)
                 )
             )
-            # new terms!
+            # new terms (previously baked into tabulated rates)
             + 4 * geL*geR * (f_ann_2 * 32 * (
                 T_1**9 * jnp.exp(2 * mu_1 / T_1) 
                 - T_2**9 * jnp.exp(2 * mu_2 / T_2)
@@ -1177,7 +1177,7 @@ def collision_terms_std(
             collision_me, interp_fs2, lambda _: 1., f_coeffs
         )
         
-        return ( # f_s, f_a now folded into f_numu -- checking if it should be the same terms for both functions
+        return ( # f_s, f_a now folded into f_numu
             4 * (gmuL**2 + gmuR**2) * (32 * f_ann_1 * (
                 T_1**9 * jnp.exp(2 * mu_1 / T_1) 
                 - T_2**9 * jnp.exp(2 * mu_2 / T_2)
@@ -1187,7 +1187,7 @@ def collision_terms_std(
                     * T_1**4 * T_2**4 * (T_1 - T_2)
                 )
             )
-            # new terms!
+            # new terms (previously baked into tabulated rates)
             + 4 * gmuL*gmuR * (f_ann_2 * 32 * (
                 T_1**9 * jnp.exp(2 * mu_1 / T_1) 
                 - T_2**9 * jnp.exp(2 * mu_2 / T_2)
