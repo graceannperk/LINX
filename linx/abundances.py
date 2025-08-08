@@ -51,7 +51,7 @@ class AbundanceModel(eqx.Module):
     species_excess_mass : dict
     species_spin : list
     species_binding_energy : list
-    species_mass : list
+    # species_mass : list
 
     def __init__(self, nuclear_net, weak_rates=wr.WeakRates()):
 
@@ -89,9 +89,9 @@ class AbundanceModel(eqx.Module):
         )
 
         # in MeV
-        self.species_mass = (
-            self.species_A * ma + self.species_excess_mass - self.species_Z * me
-        )
+        # self.species_mass = (
+        #     self.species_A * ma + self.species_excess_mass - self.species_Z * me
+        # )
 
     @eqx.filter_jit
     def __call__(
@@ -197,6 +197,7 @@ class AbundanceModel(eqx.Module):
         diff = jnp.abs(me - const.me)/const.me
         tau_n_fac = jnp.where(diff > 1e-5, tau_n_fac_vary_me(me), 1.) * tau_n_fac
 
+
         # These are in MeV
         T_g_vec  = thermo.T_g(rho_g_vec)
         T_nu_vec = thermo.T_nu(rho_nu_vec) 
@@ -253,7 +254,7 @@ class AbundanceModel(eqx.Module):
             n_CMB_start = thermo.n_massless_BE(T_start, 0., 2.)
             eta_T_start = nB(a_start, eta_fac=eta_fac) / n_CMB_start
 
-            Y_YNSE = self.YNSE(Yn_i, Yp_i, const.T_start, eta_T_start) 
+            Y_YNSE = self.YNSE(Yn_i, Yp_i, const.T_start, eta_T_start, me) 
 
             Y_others_i = Y_YNSE[2:self.nuclear_net.max_i_species]
 
@@ -471,7 +472,7 @@ class AbundanceModel(eqx.Module):
 
         return dY
 
-    def YNSE(self, Yn, Yp, T, eta): 
+    def YNSE(self, Yn, Yp, T, eta, me=const.me): 
         """
         Nuclear statistical equilibrium yields for all species. 
 
@@ -485,6 +486,8 @@ class AbundanceModel(eqx.Module):
             The temperature of the baryons in MeV.
         eta : float
             The baryon-to-photon ratio. 
+        me: float, optional
+            Electron mass in MeV.  Defaults to const.me
 
         Returns
         -------
@@ -492,8 +495,12 @@ class AbundanceModel(eqx.Module):
             Yields for all species considered in LINX (13 of them). 
         """
 
+        species_mass = (
+            self.species_A * ma + self.species_excess_mass - self.species_Z * me
+        )
+
         A32Overmn = (
-            self.species_mass / (
+            species_mass / (
                 mn**(self.species_A - self.species_Z) 
                 * mp**self.species_Z
             )
