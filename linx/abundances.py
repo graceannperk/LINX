@@ -39,8 +39,6 @@ class AbundanceModel(eqx.Module):
         Spin of each species. 
     species_binding_energy : list
         Binding energy of each species. 
-    species_mass : list
-        Mass of each species. 
     """
     nuclear_net : nucl.NuclearRates  
     weak_rates : wr.WeakRates 
@@ -89,6 +87,7 @@ class AbundanceModel(eqx.Module):
         )
 
         # in MeV
+        # requires recompilation for each me--moved to YNSE method
         # self.species_mass = (
         #     self.species_A * ma + self.species_excess_mass - self.species_Z * me
         # )
