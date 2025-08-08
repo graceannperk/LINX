@@ -13,6 +13,7 @@ import linx.weak_rates as wr
 import linx.thermo as thermo
 from linx.thermo import rho_EM_std_v, p_EM_std_v, nB
 from linx.special_funcs import zeta_3 
+from linx.tau_n_vary_me import tau_n_fac_vary_me
 
 class AbundanceModel(eqx.Module): 
     """
@@ -126,7 +127,7 @@ class AbundanceModel(eqx.Module):
             in `const.eta0` (or `const.Omegabh2`). 
         tau_n_fac : float, optional
             Rescaling factor for neutron decay lifetime, 1 for fiducial value 
-            in `const.eta0` (or `const.Omegabh2`). 
+            in `const.tau_n`. 
         nuclear_rates_q : array, optional
             q ~ N(0,1) specifies the nuclear rate in its log-normal 
             distribution. If not specified, will be taken to be `q = 0`. 
@@ -191,6 +192,10 @@ class AbundanceModel(eqx.Module):
         if T_end is None: 
 
             T_end  = const.T_end
+
+        # check if the user has varied me, and adjust the neutron lifetime if so
+        diff = jnp.abs(me - const.me)/const.me
+        tau_n_fac = jnp.where(diff > 1e-5, tau_n_fac_vary_me(me), 1.) * tau_n_fac
 
         # These are in MeV
         T_g_vec  = thermo.T_g(rho_g_vec)
