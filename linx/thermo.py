@@ -4,7 +4,7 @@ import numpy as np
 
 import jax.numpy as jnp 
 import jax.lax as lax
-from jax import grad, vmap, device_put
+from jax import grad, vmap, device_put, devices
 
 import linx.const as const 
 from linx.special_funcs import Li, K1, K2
@@ -652,7 +652,7 @@ f_numu_ann_tab = np.loadtxt(file_dir+"/data/background/"+"numu_ann.txt")
 f_coeffs = np.loadtxt(file_dir+"/data/background/"+"MB_coefficients.txt")
 
 try:
-    gpus = jax.devices('gpu')
+    gpus = devices('gpu')
     P_QED_tab = device_put(
         P_QED_tab, device=gpus[0] 
     )
@@ -1177,7 +1177,7 @@ def collision_terms_std(
             collision_me, interp_fs2, lambda _: 1., f_coeffs
         )
         
-        return ( # f_s, f_a now folded into f_numu
+        return ( # f_s, f_a now folded into f_ann and f_scat
             4 * (gmuL**2 + gmuR**2) * (32 * f_ann_1 * (
                 T_1**9 * jnp.exp(2 * mu_1 / T_1) 
                 - T_2**9 * jnp.exp(2 * mu_2 / T_2)
