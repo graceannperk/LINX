@@ -50,8 +50,8 @@ class BackgroundModel(eqx.Module):
     @eqx.filter_jit
     def __call__(
         self, Delt_Neff_init, T_start=const.T_start, 
-        T_end=const.T_end,  me=const.me, rtol=1e-8, atol=1e-10, 
-        solver=Tsit5(), max_steps=512,
+        T_end=const.T_end,  me=const.me, rtol=1e-10, atol=1e-12, # 8 and 10
+        solver=Tsit5(), max_steps=1024,
     ): 
         """ Calculate thermodynamics given an initial :math:`\\Delta N_\\mathrm{eff}`.
 
@@ -110,13 +110,18 @@ class BackgroundModel(eqx.Module):
         ) * Delt_Neff_init
 
         Y0 = (lna_init, T_EM_init, T_nu_init)
+
+        # use parametric form to estimate correct start
+        # time given T_start, assuming T ~ t^(-1/2) and
+        # initial g_* is 10.75
+        t0 = (1.5/T_start * 10.75**(-1./4))**2
         
         def T_EM_check(t, y, args, **kwargs): 
             return y[1] < T_end
             
         sol = diffeqsolve(
             ODETerm(self.dY), solver, args=(lna_init, rho_extra_init, me),
-            t0=0., t1=jnp.inf, dt0=None, y0=Y0, 
+            t0 = t0, t1=jnp.inf, dt0=None, y0=Y0, 
             saveat=SaveAt(steps=True), event=Event(T_EM_check),
             stepsize_controller = PIDController(
                 rtol=rtol, atol=atol
@@ -135,7 +140,7 @@ class BackgroundModel(eqx.Module):
         last_step_ind = jnp.max(
             jnp.argwhere(
                 sol.ys[1] < T_end,
-                size=512
+                size=1024
             )[:,0]
         )
 
