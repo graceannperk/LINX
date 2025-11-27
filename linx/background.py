@@ -38,20 +38,22 @@ class BackgroundModel(eqx.Module):
     collision_me : bool
     LO : bool
     NLO : bool
+    max_steps = int
 
-    def __init__(self, decoupled=False, use_FD=True, collision_me=True, LO=True, NLO = True): 
+    def __init__(self, decoupled=False, use_FD=True, collision_me=True, LO=True, NLO = True, max_steps=512): 
 
         self.decoupled = decoupled
         self.use_FD = use_FD
         self.collision_me = collision_me 
         self.LO = LO
         self.NLO = NLO
+        self.max_steps = max_steps
 
     @eqx.filter_jit
     def __call__(
         self, Delt_Neff_init, T_start=const.T_start, 
-        T_end=const.T_end,  me=const.me, rtol=1e-10, atol=1e-12, # 8 and 10
-        solver=Tsit5(), max_steps=1024,
+        T_end=const.T_end,  me=const.me, rtol=1e-8, atol=1e-10,
+        solver=Tsit5(),
     ): 
         """ Calculate thermodynamics given an initial :math:`\\Delta N_\\mathrm{eff}`.
 
@@ -126,7 +128,7 @@ class BackgroundModel(eqx.Module):
             stepsize_controller = PIDController(
                 rtol=rtol, atol=atol
             ), 
-            max_steps=max_steps
+            max_steps=self.max_steps
         )
 
         a_vec = jnp.exp(sol.ys[0])
@@ -140,7 +142,7 @@ class BackgroundModel(eqx.Module):
         last_step_ind = jnp.max(
             jnp.argwhere(
                 sol.ys[1] < T_end,
-                size=1024
+                size=self.max_steps
             )[:,0]
         )
 
