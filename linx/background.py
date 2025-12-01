@@ -38,7 +38,7 @@ class BackgroundModel(eqx.Module):
     collision_me : bool
     LO : bool
     NLO : bool
-    max_steps = int
+    max_steps : int
 
     def __init__(self, decoupled=False, use_FD=True, collision_me=True, LO=True, NLO = True, max_steps=512): 
 
