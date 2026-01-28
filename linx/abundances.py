@@ -5,6 +5,7 @@ sys.path.append('..')
 import jax.numpy as jnp
 import equinox as eqx
 from diffrax import diffeqsolve, ODETerm, Tsit5, Kvaerno3, PIDController, SaveAt
+import interpax
 
 import linx.nuclear as nucl
 import linx.const as const 
@@ -15,46 +16,71 @@ from linx.thermo import rho_EM_std_v, p_EM_std_v, nB
 from linx.special_funcs import zeta_3 
 from linx.tau_n_vary_me import tau_n_fac_vary_me
 
-class AbundanceModel(eqx.Module): 
+class AbundanceModel(eqx.Module):
     """
-    Abundance model and BBN abundance prediction. 
+    Abundance model and BBN abundance prediction.
 
     Attributes
     ----------
     nuclear_net : NuclearRates
-        Nuclear network to be used for BBN prediction. 
+        Nuclear network to be used for BBN prediction.
     weak_rates : WeakRates
-        Weak rates for neutron-proton interconversion. 
+        Weak rates for neutron-proton interconversion.
     species_dict : dict
-        Dictionary of species considered in LINX. 
+        Dictionary of species considered in LINX.
     species_Z : list
-        Number of protons in each species. 
+        Number of protons in each species.
     species_N : list
-        Number of neutrons in each species. 
+        Number of neutrons in each species.
     species_A : list
-        Atomic mass number of each species. 
+        Atomic mass number of each species.
     species_excess_mass : list
-        Excess mass (mass - A*amu) of each species. 
+        Excess mass (mass - A*amu) of each species.
     species_spin : list
-        Spin of each species. 
+        Spin of each species.
     species_binding_energy : list
-        Binding energy of each species. 
+        Binding energy of each species.
+    throw : bool
+        Whether to raise exceptions on solver failure.
     """
-    nuclear_net : nucl.NuclearRates  
-    weak_rates : wr.WeakRates 
+    nuclear_net : nucl.NuclearRates
+    weak_rates : wr.WeakRates
     species_dict : dict
     species_Z : list
     species_N : list
-    species_A : list 
+    species_A : list
     species_excess_mass : dict
     species_spin : list
     species_binding_energy : list
-    # species_mass : list
+    throw : bool
 
-    def __init__(self, nuclear_net, weak_rates=wr.WeakRates()):
+    def __init__(self, nuclear_net, weak_rates=wr.WeakRates(), throw=True):
+        """
+        Initialize the AbundanceModel with nuclear and weak rate networks.
 
-        self.nuclear_net = nuclear_net  
+        Parameters
+        ----------
+        nuclear_net : NuclearRates
+            Nuclear reaction network to be used for BBN calculations. This
+            defines which nuclear reactions are included in the evolution.
+        weak_rates : WeakRates, optional
+            Weak interaction rates for neutron-proton interconversion.
+            Defaults to standard WeakRates instance.
+        throw : bool, optional
+            If True, raise exceptions on solver failure. Default is True.
+            Set to False for parameter scans where some combinations may fail.
+
+        Notes
+        -----
+        This constructor initializes the species dictionary, atomic properties
+        (Z, N, A), masses, spins, binding energies, and excess masses for all
+        nuclear species considered in the LINX package (n, p, d, t, He3, He4,
+        Li6, Li7, Li8, Be7, He6, B8).
+        """
+
+        self.nuclear_net = nuclear_net
         self.weak_rates = weak_rates
+        self.throw = throw
 
         self.species_dict = {
             0:'n', 1:'p', 2:'d', 3:'t', 4:'He3', 5:'a', 6:'Li7', 7:'Be7', 
@@ -199,32 +225,44 @@ class AbundanceModel(eqx.Module):
 
         # These are in MeV
         T_g_vec  = thermo.T_g(rho_g_vec)
-        T_nu_vec = thermo.T_nu(rho_nu_vec) 
+        T_nu_vec = thermo.T_nu(rho_nu_vec)
 
-        a_start  = jnp.exp(
-            jnp.interp(
-                jnp.log(T_start), 
-                jnp.flip(jnp.log(T_g_vec)), 
-                jnp.flip(jnp.log(a_vec)), 
-                left=jnp.log(a_vec[-1]), right=jnp.log(a_vec[0])
+        # Sort by log(T_g) to handle non-monotonic temperature evolution
+        # (e.g., in reheating scenarios). interpax.interp1d requires
+        # monotonically increasing x coordinates.
+        log_T_g_vec = jnp.log(T_g_vec)
+        sort_idx = jnp.argsort(log_T_g_vec)
+        log_T_g_sorted = log_T_g_vec[sort_idx]
+        log_a_sorted = jnp.log(a_vec)[sort_idx]
+        log_t_sorted = jnp.log(t_vec)[sort_idx]
+
+        a_start = jnp.exp(
+            interpax.interp1d(
+                jnp.log(T_start),
+                log_T_g_sorted,
+                log_a_sorted,
+                method='linear',
+                extrap=True
             )
         )
 
         t_start = jnp.exp(
-            jnp.interp(
-                jnp.log(T_start), 
-                jnp.flip(jnp.log(T_g_vec)), 
-                jnp.flip(jnp.log(t_vec)),
-                left=jnp.log(t_vec[-1]), right=jnp.log(t_vec[0])
+            interpax.interp1d(
+                jnp.log(T_start),
+                log_T_g_sorted,
+                log_t_sorted,
+                method='linear',
+                extrap=True
             )
         )
 
         t_end = jnp.exp(
-            jnp.interp(
-                jnp.log(T_end), 
-                jnp.flip(jnp.log(T_g_vec)), 
-                jnp.flip(jnp.log(t_vec)),
-                left=jnp.log(t_vec[-1]), right=jnp.log(t_vec[0])
+            interpax.interp1d(
+                jnp.log(T_end),
+                log_T_g_sorted,
+                log_t_sorted,
+                method='linear',
+                extrap=True
             )
         )
 
@@ -266,15 +304,18 @@ class AbundanceModel(eqx.Module):
             saveat = SaveAt(t1=True)
 
         sol = diffeqsolve(
-            ODETerm(self.Y_prime), solver, 
-            t0=t_start, t1=t_end, dt0=None, y0=Y_i, 
-            args = (
-                a_vec, t_vec, T_g_vec, T_interval_nTOp, nTOp_frwrd, 
+            ODETerm(self.Y_prime), solver,
+            t0=t_start, t1=t_end, dt0=None, y0=Y_i,
+            args=(
+                a_vec, t_vec, T_g_vec, T_interval_nTOp, nTOp_frwrd,
                 nTOp_bkwrd, eta_fac, tau_n_fac, nuclear_rates_q
-            ), saveat=saveat, stepsize_controller = PIDController(
+            ),
+            saveat=saveat,
+            stepsize_controller=PIDController(
                 rtol=rtol, atol=atol,
-            ), 
-            max_steps=max_steps
+            ),
+            max_steps=max_steps,
+            throw=self.throw
         )
 
         if save_history: 
@@ -315,13 +356,22 @@ class AbundanceModel(eqx.Module):
 
         P_tot_vec = p_EM_std_v(T_g_vec) + 3 * (rho_nu_vec/3) + P_NP_vec
 
-        def P_tot(rho_tot): 
+        # Sort by log(rho_tot) to handle non-monotonic energy density evolution
+        # (e.g., in reheating scenarios)
+        log_rho_tot_vec = jnp.log(rho_tot_vec)
+        sort_idx_rho = jnp.argsort(log_rho_tot_vec)
+        log_rho_sorted = log_rho_tot_vec[sort_idx_rho]
+        log_P_sorted = jnp.log(P_tot_vec)[sort_idx_rho]
+
+        def P_tot(rho_tot):
 
             return jnp.exp(
-                jnp.interp(
-                    jnp.log(rho_tot), 
-                    jnp.flip(jnp.log(rho_tot_vec)), 
-                    jnp.flip(jnp.log(P_tot_vec))
+                interpax.interp1d(
+                    jnp.log(rho_tot),
+                    log_rho_sorted,
+                    log_P_sorted,
+                    method='linear',
+                    extrap=True
                 )
             )
 
@@ -335,12 +385,13 @@ class AbundanceModel(eqx.Module):
         rho_tot_fin  = rho_tot_vec[-1]
 
         sol_t = diffeqsolve(
-            ODETerm(dt_prime), Tsit5(), 
-            t0=rho_tot_init, t1=rho_tot_fin, 
-            y0=1. / (2 * thermo.Hubble(rho_tot_init)), 
+            ODETerm(dt_prime), Tsit5(),
+            t0=rho_tot_init, t1=rho_tot_fin,
+            y0=1. / (2 * thermo.Hubble(rho_tot_init)),
             dt0=None, max_steps=4096,
-            saveat=SaveAt(ts=rho_tot_vec), 
-            stepsize_controller=PIDController(rtol=1e-8, atol=1e-10)
+            saveat=SaveAt(ts=rho_tot_vec),
+            stepsize_controller=PIDController(rtol=1e-8, atol=1e-10),
+            throw=self.throw
         )
 
         return sol_t.ys
@@ -381,14 +432,24 @@ class AbundanceModel(eqx.Module):
 
         P_tot_vec = p_EM_std_v(T_g_vec) + 3 * (rho_nu_vec/3) + P_NP_vec
 
-        def P_tot(rho_tot): 
+        # Sort by log(rho_tot) to handle non-monotonic energy density evolution
+        # (e.g., in reheating scenarios)
+        log_rho_tot_vec = jnp.log(rho_tot_vec)
+        sort_idx_rho = jnp.argsort(log_rho_tot_vec)
+        log_rho_sorted = log_rho_tot_vec[sort_idx_rho]
+        log_P_sorted = jnp.log(P_tot_vec)[sort_idx_rho]
+
+        def P_tot(rho_tot):
 
             return jnp.exp(
-                jnp.interp(
-                    jnp.log(rho_tot), jnp.flip(jnp.log(rho_tot_vec)), 
-                    jnp.flip(jnp.log(P_tot_vec))
+                interpax.interp1d(
+                    jnp.log(rho_tot),
+                    log_rho_sorted,
+                    log_P_sorted,
+                    method='linear',
+                    extrap=True
                 )
-            )   
+            )
 
         def dlna_prime(rho_tot, t, args): 
 
@@ -397,13 +458,14 @@ class AbundanceModel(eqx.Module):
         rho_tot_init = rho_tot_vec[0]
         rho_tot_fin  = rho_tot_vec[-1]
 
-        # a_0 = 1 arbitrarily, will rescale later. 
+        # a_0 = 1 arbitrarily, will rescale later.
         sol_lna = diffeqsolve(
-            ODETerm(dlna_prime), Tsit5(), 
-            t0=rho_tot_init, t1=rho_tot_fin, 
+            ODETerm(dlna_prime), Tsit5(),
+            t0=rho_tot_init, t1=rho_tot_fin,
             y0=0., dt0=None, max_steps=4096,
             saveat=SaveAt(ts=rho_tot_vec),
-            stepsize_controller=PIDController(rtol=1e-8, atol=1e-10)
+            stepsize_controller=PIDController(rtol=1e-8, atol=1e-10),
+            throw=self.throw
         )
 
         a_fin = const.T0CMB / T_g_vec[-1] 

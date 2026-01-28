@@ -16,7 +16,7 @@ rho_massless_FD_v = vmap(
     thermo.rho_massless_FD, in_axes=(0, None, None)
 )
 
-class BackgroundModel(eqx.Module): 
+class BackgroundModel(eqx.Module):
     """Background model.
 
     Attributes
@@ -31,6 +31,9 @@ class BackgroundModel(eqx.Module):
         Whether to use leading order QED correction. Default is `True`.
     NLO : bool, optional
         Whether to use next-to-leading order QED correction. Default is True.
+    throw : bool, optional
+        Whether to raise exceptions on solver failure. Default is `True`.
+        Set to `False` for parameter scans where some combinations may fail.
     """
 
     decoupled : bool
@@ -39,15 +42,38 @@ class BackgroundModel(eqx.Module):
     LO : bool
     NLO : bool
     max_steps : int
+    throw : bool
 
-    def __init__(self, decoupled=False, use_FD=True, collision_me=True, LO=True, NLO = True, max_steps=512): 
+    def __init__(self, decoupled=False, use_FD=True, collision_me=True, LO=True, NLO = True, throw=True, max_steps=512): 
+
+        """
+        Initialize the BackgroundModel with thermodynamic options.
+
+        Parameters
+        ----------
+        decoupled : bool, optional
+            If True, neutrinos are always decoupled. Default is False.
+        use_FD : bool, optional
+            If True, use Fermi-Dirac statistics for neutrinos. Default is True.
+        collision_me : bool, optional
+            If True, include finite electron mass corrections in collision terms.
+            Default is True.
+        LO : bool, optional
+            If True, include leading order QED corrections. Default is True.
+        NLO : bool, optional
+            If True, include next-to-leading order QED corrections. Default is True.
+        throw : bool, optional
+            If True, raise exceptions on solver failure. Default is True.
+            Set to False for parameter scans where some combinations may fail.
+        """
 
         self.decoupled = decoupled
         self.use_FD = use_FD
-        self.collision_me = collision_me 
+        self.collision_me = collision_me
         self.LO = LO
         self.NLO = NLO
         self.max_steps = max_steps
+        self.throw = throw
 
     @eqx.filter_jit
     def __call__(
@@ -125,10 +151,11 @@ class BackgroundModel(eqx.Module):
             ODETerm(self.dY), solver, args=(lna_init, rho_extra_init, me),
             t0 = t0, t1=jnp.inf, dt0=None, y0=Y0, 
             saveat=SaveAt(steps=True), event=Event(T_EM_check),
-            stepsize_controller = PIDController(
+            stepsize_controller=PIDController(
                 rtol=rtol, atol=atol
             ), 
-            max_steps=self.max_steps
+            max_steps=self.max_steps,
+            throw=self.throw
         )
 
         a_vec = jnp.exp(sol.ys[0])

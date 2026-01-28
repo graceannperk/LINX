@@ -1,10 +1,11 @@
-import os 
+import os
 
 import numpy as np
 
-import jax.numpy as jnp 
+import jax.numpy as jnp
 import jax.lax as lax
 from jax import grad, vmap, device_put, devices
+import interpax
 
 import linx.const as const 
 from linx.special_funcs import Li, K1, K2
@@ -634,10 +635,10 @@ def p_massive_MB(T, mu, m, g):
 
 file_dir = os.path.dirname(__file__)
 
-# QED Corrections (assume me = 0.511 MeV)
-P_QED_tab = np.loadtxt(file_dir+"/data/background/"+"QED_P_int.txt")
-dPdT_QED_tab = np.loadtxt(file_dir+"/data/background/"+"QED_dP_intdT.txt")
-# d2PdT2_QED_tab = np.loadtxt(file_dir+"/data/background/"+"QED_d2P_intdT2.txt") # CG: JAX grad obviates this import...
+# QED Corrections - flip to ensure monotonically increasing T for interpax.interp1d (assume me = 0.511 MeV)
+P_QED_tab = np.flip(np.loadtxt(file_dir+"/data/background/"+"QED_P_int.txt"), axis=0)
+dPdT_QED_tab = np.flip(np.loadtxt(file_dir+"/data/background/"+"QED_dP_intdT.txt"), axis=0)
+# d2PdT2_QED_tab = np.flip(np.loadtxt(file_dir+"/data/background/"+"QED_d2P_intdT2.txt"), axis=0) # CG: JAX grad obviates this import...
 
 # Effect of standard value of electron mass in scattering matrix elements (assume me = 0.511 MeV)
 f_nue_scat_tab = np.loadtxt(file_dir+"/data/background/"+"nue_scatt.txt")
@@ -680,7 +681,8 @@ try:
     f_coeffs = device_put(
         f_coeffs, device=gpus[0]
     )
-except: 
+except (RuntimeError, IndexError):
+    # No GPU available or no GPU devices found - data stays on CPU
     pass
 
 
@@ -717,14 +719,14 @@ def rho_EM_std(T_g, mu=0, me=const.me, LO=True, NLO=True):
     corr_QED = jnp.where(jnp.abs(me/const.me - 1) > 1e-8, # if input me is sufficiently different from const.me,
         -(LO*explicit_P2(T_g, me) + NLO*explicit_P3(T_g, me)) + T_g*(LO*dPdTQED_2(T_g, me) + NLO*dPdTQED_3(T_g, me)), # compute the QED correction
         (
-            -jnp.interp(
-                T_g, jnp.flip(P_QED_tab[:,0]), 
-                jnp.flip(LO*P_QED_tab[:,1]+NLO*P_QED_tab[:,2])
-            ) 
-            + T_g*jnp.interp(
-                T_g, jnp.flip(dPdT_QED_tab[:,0]),
-                jnp.flip(LO*dPdT_QED_tab[:,1]+NLO*dPdT_QED_tab[:,2])
-            )
+            -interpax.interp1d(
+              T_g, P_QED_tab[:,0],
+              LO*P_QED_tab[:,1]+NLO*P_QED_tab[:,2]
+          )
+          + T_g*interpax.interp1d(
+              T_g, dPdT_QED_tab[:,0],
+              LO*dPdT_QED_tab[:,1]+NLO*dPdT_QED_tab[:,2]
+          )
         ) # otherwise just use pretabulated values
     )
 
@@ -763,9 +765,9 @@ def p_EM_std(T_g, mu=0, me=const.me, LO=True, NLO=True):
 
     corr_QED = jnp.where(jnp.abs(me/const.me - 1) > 1e-8, # if input me is sufficiently different from const.me,
         LO*explicit_P2(T_g, me) + NLO*explicit_P3(T_g, me), # compute the QED correction
-        jnp.interp(
-            T_g, jnp.flip(P_QED_tab[:,0]),
-            jnp.flip(LO*P_QED_tab[:,1] + NLO*P_QED_tab[:,2])
+        interpax.interp1d(
+          T_g, P_QED_tab[:,0],
+          LO*P_QED_tab[:,1] + NLO*P_QED_tab[:,2]
         ) # otherwise just use pretabulated values
     )
 
@@ -805,9 +807,9 @@ def rho_plus_p_EM_std(T_g, mu=0, me=const.me, LO=True, NLO=True):
         
     corr_QED = jnp.where(jnp.abs(me/const.me - 1) > 1e-8, # if input me is sufficiently different from const.me,
         T_g*(LO*dPdTQED_2(T_g, me) + NLO*dPdTQED_3(T_g, me)), # compute the QED correction
-        T_g * jnp.interp(
-            T_g, jnp.flip(dPdT_QED_tab[:,0]),
-            jnp.flip(LO*dPdT_QED_tab[:,1] + NLO*dPdT_QED_tab[:,2])
+        T_g * interpax.interp1d(
+          T_g, dPdT_QED_tab[:,0],
+          LO*dPdT_QED_tab[:,1] + NLO*dPdT_QED_tab[:,2]
         ) # otherwise just use pretabulated values
     )
     
@@ -895,60 +897,60 @@ def n_nue_std(T_nue, mu_nue=0.):
 
     return n_massless_FD(T_nue, mu_nue, 2) 
 
-def rho_numt_std(T_numt, mu_numt=0.): 
+def rho_numt_std(T_numt, mu_numt=0.):
     """
     Total energy density of mu, tau neutrinos.
 
     Parameters
     ----------
-    T_nue : float
+    T_numt : float
         Mu, tau neutrino temperature in MeV.
-    mu_nue : float, optional
+    mu_numt : float, optional
         Chemical potential of mu,tau neutrinos in MeV. Defaults to 0.
         
     Returns
     -------
     float
-        Units of MeV^4. 
-    """ 
+        Units of MeV^4.
+    """
 
     return 2 * rho_massless_FD(T_numt, mu_numt, 2)
 
-def p_numt_std(T_numt, mu_numt=0.): 
+def p_numt_std(T_numt, mu_numt=0.):
     """
     Total pressure of mu, tau neutrinos.
 
     Parameters
     ----------
-    T_nue : float
+    T_numt : float
         Mu, tau neutrino temperature in MeV.
-    mu_nue : float, optional
+    mu_numt : float, optional
         Chemical potential of mu,tau neutrinos in MeV.  Defaults to 0.
         
     Returns
     -------
     float
-        Units of MeV^4. 
-    """ 
+        Units of MeV^4.
+    """
 
     return 2 * rho_massless_FD(T_numt, mu_numt, 2) / 3
 
-def n_numt_std(T_numt, mu_numt=0.): 
+def n_numt_std(T_numt, mu_numt=0.):
     """
     Total number density of mu, tau neutrinos.
 
     Parameters
     ----------
-    T_nue : float
+    T_numt : float
         Mu, tau neutrino temperature in MeV.
-    mu_nue : float, optional
+    mu_numt : float, optional
         Chemical potential of mu,tau neutrinos in MeV.  Defaults to 0.
         
     Returns
     -------
     float
-        Units of MeV^4. 
-    """ 
+        Units of MeV^3.
+    """
 
     return 2 * n_massless_FD(T_numt, mu_numt, 2)
 
@@ -1049,7 +1051,7 @@ def collision_terms_std(
         )
 
     def G_nue_with_me(T_1, mu_1, T_2, mu_2, me):
-
+    # CG: update to use interp1d
         def interp_fa1(f_tab): 
             index = 1
             return jnp.interp(
@@ -1072,7 +1074,12 @@ def collision_terms_std(
             index = 6
             return jnp.interp(
                 me/T_1, f_tab[:,0], f_tab[:,index], left=f_tab[0,index], right=f_tab[-1,index]
-            )
+              
+#         def interp_f(f_tab):
+#             # Tables have boundary values 0.0 (low T) and 1.0 (high T)
+#             return interpax.interp1d(
+#                 T_1, f_tab[:,0], f_tab[:,1], extrap=(0.0, 1.0)
+#             )
             
 
         # def interp_f(f_tab): 
@@ -1123,7 +1130,7 @@ def collision_terms_std(
                 )
             )
         )
-
+    # CG: update to use interp1d
     def G_numt_with_me(T_1, mu_1, T_2, mu_2, me): 
 
         def interp_fa1(f_tab): 
@@ -1148,7 +1155,13 @@ def collision_terms_std(
             index = 6
             return jnp.interp(
                 me/T_1, f_tab[:,0], f_tab[:,index], left=f_tab[0,index], right=f_tab[-1,index]
-            )
+#     def G_numt_with_me(T_1, mu_1, T_2, mu_2):
+
+#         def interp_f(f_tab):
+#             # Tables have boundary values 0.0 (low T) and 1.0 (high T)
+#             return interpax.interp1d(
+#                 T_1, f_tab[:,0], f_tab[:,1], extrap=(0.0, 1.0)
+#             )
 
         # def interp_f(f_tab): 
 

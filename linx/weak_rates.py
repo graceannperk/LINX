@@ -6,12 +6,13 @@ import jax
 import jax.numpy as jnp
 # As of jax v0.4.24, jax.numpy.trapz has been deprecated, and replaced
 # by scipy.integrate.trapezoid.
-try: 
-    import jax.numpy.trapz as trapz 
-except ImportError: 
+try:
+    import jax.numpy.trapz as trapz
+except ImportError:
     from jax.scipy.integrate import trapezoid as trapz
 
 import equinox as eqx
+import interpax
 
 import linx.const as const 
 from linx.special_funcs import gamma 
@@ -99,7 +100,8 @@ class WeakRates(eqx.Module):
                 self.L_nTOpCCRTh_res = jax.device_put(
                     self.L_nTOpCCRTh_res, device=gpus[0]
                 )
-            except: 
+            except (RuntimeError, IndexError):
+                # No GPU available or no GPU devices found - data stays on CPU
                 pass
 
             self.T_pTOn_thermal_interval, self.L_pTOnCCRTh_res = np.loadtxt(
@@ -116,7 +118,8 @@ class WeakRates(eqx.Module):
                 self.L_pTOnCCRTh_res = jax.device_put(
                     self.L_pTOnCCRTh_res, device=gpus[0]
                 )
-            except: 
+            except (RuntimeError, IndexError):
+                # No GPU available or no GPU devices found - data stays on CPU
                 pass
 
         else: 
@@ -205,11 +208,19 @@ class WeakRates(eqx.Module):
 
         Tg_vec_ref, Tnu_vec_ref = T_vec_ref
         Tnu_of_Tg_ref = Tnu_vec_ref / Tg_vec_ref
-        
+
+        # Sort by Tg to handle non-monotonic temperature evolution
+        # (e.g., in reheating scenarios)
+        sort_idx = jnp.argsort(Tg_vec_ref)
+        Tg_sorted = Tg_vec_ref[sort_idx]
+        Tnu_of_Tg_sorted = Tnu_of_Tg_ref[sort_idx]
+
         x = me / Tg
         xnu = me / (
-            Tg * jnp.interp(
-                Tg, jnp.flip(Tg_vec_ref), jnp.flip(Tnu_of_Tg_ref), left=Tnu_of_Tg_ref[-1], right=Tnu_of_Tg_ref[0]
+            Tg * interpax.interp1d(
+                Tg, Tg_sorted, Tnu_of_Tg_sorted,
+                method='linear',
+                extrap=True
             )
         )
 
