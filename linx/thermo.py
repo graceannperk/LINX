@@ -1074,7 +1074,7 @@ def collision_terms_std(
             index = 6
             return jnp.interp(
                 me/T_1, f_tab[:,0], f_tab[:,index], left=f_tab[0,index], right=f_tab[-1,index]
-              
+            )
 #         def interp_f(f_tab):
 #             # Tables have boundary values 0.0 (low T) and 1.0 (high T)
 #             return interpax.interp1d(
@@ -1154,7 +1154,7 @@ def collision_terms_std(
         def interp_fs2(f_tab): 
             index = 6
             return jnp.interp(
-                me/T_1, f_tab[:,0], f_tab[:,index], left=f_tab[0,index], right=f_tab[-1,index]
+                me/T_1, f_tab[:,0], f_tab[:,index], left=f_tab[0,index], right=f_tab[-1,index])
 #     def G_numt_with_me(T_1, mu_1, T_2, mu_2):
 
 #         def interp_f(f_tab):
