@@ -128,6 +128,10 @@ class BackgroundModel(eqx.Module):
             Energy density of one species of neutrinos in MeV^4 at each point in time.
         rho_extra_vec : array_like
             Energy density in MeV^4 of extra species at each point in time.
+        mu_nue_vec : array_like
+            Chemical potential of electron neutrinos in MeV
+        mu_numt_vec : array_like
+            Chemical potential of muon and tau neutrinos in MeV.
         """
         print('`\\         /´  ||||        ||||  |||||     ||||  ||||   ||||')
         print(' /\\_______/\\   ||||        ||||  |||||||   ||||   |||| ||||') 
@@ -139,11 +143,13 @@ class BackgroundModel(eqx.Module):
 
         print('Compiling thermodynamics model...')
 
+
+
         lna_init = 0. 
         T_EM_init = T_start
-        T_nu_init = T_EM_init 
+        T_nue_init = T_EM_init 
+        T_numt_init = T_EM_init
 
-        #grace, ask cara about this. 
         mu_nue_init = 0.
         mu_numt_init = 0.
 
@@ -151,7 +157,7 @@ class BackgroundModel(eqx.Module):
             thermo.rho_massless_BE(T_EM_init, 0., 2)
         ) * Delt_Neff_init
 
-        Y0 = (lna_init, T_EM_init, T_nu_init, mu_nue_init, mu_numt_init)
+        Y0 = (lna_init, T_EM_init, T_nue_init, T_numt_init, mu_nue_init, mu_numt_init)
 
         # use parametric form to estimate correct start
         # time given T_start, assuming T ~ t^(-1/2) and
@@ -203,9 +209,15 @@ class BackgroundModel(eqx.Module):
 
         Neff_vec = thermo.N_eff(rho_tot_vec, rho_g_vec)
 
+        T_nue_vec = sol.ys[2]
+        T_numt_vec = sol.ys[3]
+
+        mu_nue_vec = sol.ys[4]
+        mu_numt_vec = sol.ys[5]
+        
         return (
             t_vec, a_vec, rho_g_vec, rho_nu_vec, 
-            rho_extra_vec, P_extra_vec, Neff_vec
+            rho_extra_vec, P_extra_vec, Neff_vec, T_nue_vec, T_numt_vec, mu_nue_vec, mu_numt_vec
         )
     
     @eqx.filter_jit
@@ -227,26 +239,27 @@ class BackgroundModel(eqx.Module):
         """
         
 
-        lna, T_g, T_nu, mu_nue, mu_numt = Y
-        def printer(x):
-            print(x)
-        jax.debug.callback(printer,mu_nue)
+        lna, T_g, T_nue, T_numt, mu_nue, mu_numt = Y
         lna_init, rho_extra_init, me = args
 
         rho_EM = thermo.rho_EM_std(T_g, me=me, LO=self.LO, NLO=self.NLO)
         rho_plus_p_EM = thermo.rho_plus_p_EM_std(T_g, me=me, LO=self.LO, NLO=self.NLO)
         drho_EM_dT_g = thermo.drho_EM_dT_g_std(T_g, me=me, LO=self.LO, NLO=self.NLO)
 
-        rho_nu = 3*thermo.rho_nue_std(T_nu, mu_nue)
-        rho_plus_p_nu = (4/3) * rho_nu
-        drho_nu_dT_nu = 3*thermo.drho_nue_dT_nue_std(T_nu, mu_nue)
+        #rho_nu = 3*thermo.rho_nue_std(T_nu, mu_nue)
+
+        rho_nue = thermo.rho_nue_std(T_nue, mu_nue)
+        rho_numt = thermo.rho_numt_std(T_numt, mu_numt)
+
+        rho_plus_p_nu = (4/3) * (rho_nue + rho_numt)
+        drho_nu_dT_nu = 3*thermo.drho_nue_dT_nue_std(T_nue, mu_nue)
 
         rho_extra = rho_extra_init * jnp.exp(lna_init)**4 / jnp.exp(lna)**4 
 
-        H = thermo.Hubble(rho_EM + rho_nu + rho_extra)
+        H = thermo.Hubble(rho_EM + rho_nue + rho_numt + rho_extra)
 
         C_rho_nue, C_rho_numu, C_n_nue, C_n_numu = thermo.collision_terms_std(
-            T_g, T_nu, T_nu, mu_nue, mu_numt, decoupled=self.decoupled, use_FD=self.use_FD, collision_me=self.collision_me
+            T_g, T_nue, T_numt, me, mu_nue, mu_numt, decoupled=self.decoupled, use_FD=self.use_FD, collision_me=self.collision_me
         )
 
         drho_EM_dt = -3 * H * rho_plus_p_EM - C_rho_nue - 2*C_rho_numu
@@ -255,19 +268,23 @@ class BackgroundModel(eqx.Module):
         dT_g_dt = drho_EM_dt / drho_EM_dT_g
         dT_nu_dt = drho_nu_dt / drho_nu_dT_nu
 
-        P_e = thermo.rho_nue_std(T_g, mu_nue) / 3
-        
-        
-        # dmue_dt = -(-3.* H *( (thermo.rho_nue_std(T_nu)+P_e) * thermo.dn_nue_dT_nue_std(T_nu, mu_nue) - thermo.n_nue_std(T_nu) * thermo.drho_nue_dT_nue_std(T_nu, mu_nue)) + thermo.dn_nue_dT_nue_std(T_nu, mu_nue) * thermo.drho_nue_dT_nue_std(T_nu, mu_nue) - thermo.drho_nue_dT_nue_std(T_nu, mu_nue) * C_n_nue)/(thermo.dn_nue_dmu_nue_std(T_nu, mu_nue) * thermo.drho_nue_dT_nue_std(T_nu, mu_nue) - thermo.dn_nue_dT_nue_std(T_nu, mu_nue) * thermo.drho_nue_dmu_nue_std(T_nu, mu_nue))
-        
-        
-        P_mu = thermo.rho_numt_std(T_nu, mu_numt=mu_numt) / 3
-        
+        P_e = thermo.rho_nue_std(T_nue, mu_nue) / 3
+        P_mu = thermo.rho_numt_std(T_numt, mu_numt) / 3
 
-        # dmunu_dt = -(-3.*H*( (thermo.rho_numt_std(T_nu)+P_mu)* thermo.dn_numt_dT_numt_std(T_nu, mu_numt) - thermo.n_numt_std(T_nu) * thermo.drho_numt_dT_numt_std(T_nu, mu_numt)) + thermo.dn_numt_dT_numt_std(T_nu, mu_numt) * thermo.drho_numt_dT_numt_std(T_nu, mu_numt) - thermo.drho_numt_dT_numt_std(T_nu, mu_numt) * C_n_numu )/(thermo.dn_numt_dmu_numt_std(T_nu, mu_numt) * thermo.drho_numt_dT_numt_std(T_nu, mu_numt) - thermo.dn_numt_dT_numt_std(T_nu, mu_numt) * thermo.drho_numt_dmu_numt_std(T_nu, mu_numt))
 
-        dmue_dt = -(3. * H * (thermo.rho_nue_std(T_nu, mu_nue) + P_e))
+        n_e = thermo.n_nue_std(T_nue, mu_nue)
+        n_mu = thermo.n_numt_std(T_numt, mu_numt)
 
-        dmunu_dt = -(3. * H * (thermo.rho_numt_std(T_nu, mu_nue) + P_e))
+        C_rho_numt_tot = 2*C_rho_numu
+        C_n_numt_tot   = 2*C_n_numu
+
+        dTnue_dt = (-3.*H*( (thermo.rho_nue_std(T_nue, mu_nue)+P_e)*thermo.dn_nue_dmu_nue_std(T_nue, mu_nue) - n_e*thermo.drho_nue_dmu_nue_std(T_nue, mu_nue)) + thermo.dn_nue_dmu_nue_std(T_nue, mu_nue)* C_rho_nue - thermo.drho_nue_dmu_nue_std(T_nue, mu_nue)*C_n_nue)/(thermo.dn_nue_dmu_nue_std(T_nue, mu_nue) * thermo.drho_nue_dT_nue_std(T_nue, mu_nue) - thermo.dn_nue_dT_nue_std(T_nue, mu_nue) * thermo.drho_nue_dmu_nue_std(T_nue, mu_nue))
+
+        dTnumu_dt = (-3.*H*( (thermo.rho_numt_std(T_numt, mu_numt)+P_mu)*thermo.dn_numt_dmu_numt_std(T_numt, mu_numt) - n_mu*thermo.drho_numt_dmu_numt_std(T_numt, mu_numt)) + thermo.dn_numt_dmu_numt_std(T_numt, mu_numt)*C_rho_numt_tot - thermo.drho_numt_dmu_numt_std(T_numt, mu_numt)*C_n_numt_tot)/(thermo.dn_numt_dmu_numt_std(T_numt, mu_numt) * thermo.drho_numt_dT_numt_std(T_numt, mu_numt) - thermo.dn_numt_dT_numt_std(T_numt, mu_numt) * thermo.drho_numt_dmu_numt_std(T_numt, mu_numt))
+
+        dmue_dt = -(-3.* H *( (thermo.rho_nue_std(T_nue, mu_nue)+P_e) * thermo.dn_nue_dT_nue_std(T_nue, mu_nue) - thermo.n_nue_std(T_nue, mu_nue) * thermo.drho_nue_dT_nue_std(T_nue, mu_nue)) + thermo.dn_nue_dT_nue_std(T_nue, mu_nue) * C_rho_nue - thermo.drho_nue_dT_nue_std(T_nue, mu_nue) * C_n_nue)/(thermo.dn_nue_dmu_nue_std(T_nue, mu_nue) * thermo.drho_nue_dT_nue_std(T_nue, mu_nue) - thermo.dn_nue_dT_nue_std(T_nue, mu_nue) * thermo.drho_nue_dmu_nue_std(T_nue, mu_nue))
         
-        return H, dT_g_dt, dT_nu_dt, dmue_dt, dmunu_dt
+        dmunu_dt = -(-3.*H*( (thermo.rho_numt_std(T_numt, mu_numt)+P_mu)* thermo.dn_numt_dT_numt_std(T_numt, mu_numt) - thermo.n_numt_std(T_numt, mu_numt) * thermo.drho_numt_dT_numt_std(T_numt, mu_numt)) + thermo.dn_numt_dT_numt_std(T_numt, mu_numt) * C_rho_numt_tot - thermo.drho_numt_dT_numt_std(T_numt, mu_numt) * C_n_numt_tot )/(thermo.dn_numt_dmu_numt_std(T_numt, mu_numt) * thermo.drho_numt_dT_numt_std(T_numt, mu_numt) - thermo.dn_numt_dT_numt_std(T_numt, mu_numt) * thermo.drho_numt_dmu_numt_std(T_numt, mu_numt))
+
+        
+        return H, dT_g_dt, dTnue_dt, dTnumu_dt, dmue_dt, dmunu_dt
