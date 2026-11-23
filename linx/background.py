@@ -184,11 +184,18 @@ class BackgroundModel(eqx.Module):
             jnp.log(sol.ts[0]), jnp.log(sol.ts[-1]), self.n_out
             ))
         t_vec = t_vec.at[0].set(sol.ts[0]).at[-1].set(sol.ts[-1])
-        lna_vec, T_EM_vec, T_nu_vec = jax.vmap(sol.evaluate)(t_vec)
+        (
+            lna_vec, T_EM_vec, T_nue_vec, T_numt_vec, mu_nue_vec, mu_numt_vec
+        ) = jax.vmap(sol.evaluate)(t_vec)
 
         a_vec = jnp.exp(lna_vec)
         rho_g_vec = rho_massless_BE_v(T_EM_vec, 0., 2)
-        rho_nu_vec = rho_massless_FD_v(T_nu_vec, 0., 2)
+        # Energy density per neutrino species, averaged over nu_e, nu_mu and
+        # nu_tau, so that 3 * rho_nu_vec is the total neutrino energy density.
+        rho_nu_vec = (
+            jax.vmap(thermo.rho_nue_std)(T_nue_vec, mu_nue_vec)
+            + jax.vmap(thermo.rho_numt_std)(T_numt_vec, mu_numt_vec)
+        ) / 3
         
         # Trivial relation between rho_extra and a. 
         rho_extra_vec = rho_extra_init * (jnp.exp(lna_init)**4 / a_vec**4)
@@ -209,12 +216,6 @@ class BackgroundModel(eqx.Module):
 
         Neff_vec = thermo.N_eff(rho_tot_vec, rho_g_vec)
 
-        T_nue_vec = sol.ys[2]
-        T_numt_vec = sol.ys[3]
-
-        mu_nue_vec = sol.ys[4]
-        mu_numt_vec = sol.ys[5]
-        
         return (
             t_vec, a_vec, rho_g_vec, rho_nu_vec, 
             rho_extra_vec, P_extra_vec, Neff_vec, T_nue_vec, T_numt_vec, mu_nue_vec, mu_numt_vec
